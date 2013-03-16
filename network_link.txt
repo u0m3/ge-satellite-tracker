@@ -1,0 +1,10 @@
+<NetworkLink>
+<name>[SATELLITE_NAME]</name>
+<visibility>1</visibility>
+<open>0</open>
+<Link>
+<href>http://[SERVER_PORT]/[REQUEST_NAME]</href>
+<refreshMode>onInterval</refreshMode>
+<refreshInterval>[REFRESH_INTERVAL]</refreshInterval>
+</Link>
+</NetworkLink> 

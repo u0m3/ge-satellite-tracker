@@ -1,0 +1,11 @@
+<Placemark> 
+<name>[NAME]</name>
+<styleUrl>#sat</styleUrl>
+<Point>
+<extrude>1</extrude>
+<altitudeMode>relativeToGround</altitudeMode>
+<coordinates>
+[COORD]
+</coordinates>
+</Point>
+</Placemark>
