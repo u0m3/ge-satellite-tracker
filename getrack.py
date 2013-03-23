@@ -1,7 +1,9 @@
 import ephem
+import getopt
 import logging
 import math
 import os
+import sys
 import time
 import urllib
 import urllib2
@@ -321,7 +323,11 @@ def download_keps(config):
 
 def validate_config_file(filename):
 
-	log.info('validating config file')
+	log.info('validating config file %s', filename)
+
+	if not os.path.exists(filename):
+		log.error('unable to find configuration file')
+		return None
 
 	config = ConfigParser.ConfigParser()
 	config.read(filename)
@@ -353,9 +359,27 @@ def validate_config_file(filename):
 
 	return config 
 
+def usage():
+	print '''python getrack.cfg -c config_filename'''
+
 if __name__ == '__main__':
 
 	config_filename = _default_configfile 
+
+	try:
+		opts, args = getopt.getopt(sys.argv[1:], "hc:v", ["help", "config="])
+	except getopt.GetoptError as err:
+		print str(err)
+		usage()
+		sys.exit(2)
+	for o, a in opts:
+		if o in ("-h", "--help"):
+			usage()
+			sys.exit()
+		elif o in ("-c", "--config"):
+			config_filename = a
+		else:
+			assert False, "unhandled option"
 
 	config = validate_config_file(config_filename)
 	if config is None:
