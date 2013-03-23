@@ -9,27 +9,86 @@ import BaseHTTPServer
 import ConfigParser
 from SimpleHTTPServer import SimpleHTTPRequestHandler
 
-_configfile = 'getrack.cfg'
+_http_get_methods = {}
+_default_configfile = 'getrack.cfg'
 
-log = logging.getLogger()
-log.setLevel(logging.DEBUG)
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(logging.DEBUG)
-stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-log.addHandler(stream_handler)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
+log = logging.getLogger('getrack')
 
-log.info('reading configuration file')
-config = ConfigParser.ConfigParser()
-config.read(_configfile)
+# TEMPLATE KMLS
 
-log.info('reading kml templates')
-_network_link_kml = open('network_link.txt').read()
-_network_link_main_kml = open('network_links.txt').read()
-_satellite_kml_template = open('satellite_kml.txt').read()
-_satellite_placemark_template = open('satellite_line_placemark.txt').read()
-_satellite_point_template = open('satellite_point_placemark.txt').read()
+_network_link_kml = '''
+<NetworkLink>
+	<name>[SATELLITE_NAME]</name><visibility>1</visibility><open>0</open>
+	<Link>
+		<href>http://[SERVER_PORT]/[REQUEST_NAME]</href>
+		<refreshMode>onInterval</refreshMode>
+		<refreshInterval>[REFRESH_INTERVAL]</refreshInterval>
+	</Link>
+</NetworkLink>
+'''
 
-_methods = {}
+_network_link_main_kml = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+[NETWORK_LINKS]
+</Document>
+</kml>
+'''
+
+_satellite_kml_template = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+	<Document>
+		<name>[SATELLITE_NAME]</name>
+		<description>[DESCRIPTION]</description>
+		<Style id="sat">
+			<IconStyle>
+			<Icon>
+				<href>http://[SERVER]/icon</href>
+			</Icon>
+		</IconStyle>
+		</Style>
+		[PLACEMARKS]
+	</Document>
+</kml>
+'''
+
+_satellite_line_placemark_template = '''
+<Placemark>
+	<name>[NAME]</name>
+	<description>[DESCRIPTION]</description>
+	<LineString>
+		<extrude>0</extrude>
+		<tessellate>1</tessellate>
+		<altitudeMode>relativeToGround</altitudeMode>
+		<coordinates>
+		[COORDS]
+		</coordinates>
+	</LineString>
+	<Style>
+		<LineStyle>
+			<width>3</width>
+			<color>[COLOR]</color>
+			<colorMode>normal</colorMode>
+			<gx:labelVisibility>1</gx:labelVisibility>
+		</LineStyle>
+	</Style>
+</Placemark>
+'''
+
+_satellite_point_template = '''
+<Placemark> 
+	<name>[NAME]</name>
+	<styleUrl>#sat</styleUrl>
+	<Point>
+	<extrude>1</extrude>
+	<altitudeMode>relativeToGround</altitudeMode>
+	<coordinates>
+	[COORD]
+	</coordinates>
+	</Point>
+</Placemark>
+'''
 
 def swap(input, tokens):
 	for key in tokens:
@@ -61,13 +120,13 @@ def get_kml_for_path(config, sat_name, path):
 			color = eclipsed_color 
 			coords += '%lf,%lf,%lf\n%lf,%lf,%lf\n' % (rec[1], rec[2], rec[3], next_rec[1], next_rec[2], next_rec[3])
 			tokens = { '[NAME]':sat_name, '[DESCRIPTION]':'', '[COORDS]':coords, '[COLOR]':color }
-			kml_placemarks += swap(_satellite_placemark_template, tokens)
+			kml_placemarks += swap(_satellite_line_placemark_template, tokens)
 			coords = '%lf,%lf,%lf\n' % (next_rec[1], next_rec[2], next_rec[3])
 		elif not rec_eclipsed and next_rec_eclipsed:
 			color = daylight_color 
 			coords += '%lf,%lf,%lf\n%lf,%lf,%lf\n' % (rec[1], rec[2], rec[3], next_rec[1], next_rec[2], next_rec[3])
 			tokens = { '[NAME]':sat_name, '[DESCRIPTION]':'', '[COORDS]':coords, '[COLOR]':color }
-			kml_placemarks += swap(_satellite_placemark_template, tokens)
+			kml_placemarks += swap(_satellite_line_placemark_template, tokens)
 			coords = '%lf,%lf,%lf\n' % (next_rec[1], next_rec[2], next_rec[3])
 		else:
 			color = eclipsed_color 
@@ -75,7 +134,7 @@ def get_kml_for_path(config, sat_name, path):
 
 	if len(coords) > 0:
 		tokens = { '[NAME]':sat_name, '[DESCRIPTION]':'', '[COORDS]':coords, '[COLOR]':color }
-		kml_placemarks += swap(_satellite_placemark_template, tokens)
+		kml_placemarks += swap(_satellite_line_placemark_template, tokens)
 
 	coord = path[len(path)/2]
 
@@ -143,7 +202,7 @@ def generate_satellites_kml(config, keps):
 
 			log.info('processing: ' + sat_name)
 			method_name = 'satellite%d' % ( i )
-			_methods[method_name] = kep
+			_http_get_methods[method_name] = kep
 			network_link_kmls += get_network_link_kml(config, sat_name, server_address, server_port, method_name)
 			i += 1
 
@@ -155,10 +214,12 @@ def generate_satellites_kml(config, keps):
 	main_network_links_kml = swap(_network_link_main_kml, tokens)
 	open('satellites.kml', 'w').write(main_network_links_kml)
 
-#	def log_message(s, format, *args):
-#		return
 
 class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
+
+	def log_message(s, format, *args):
+		return
+
 
 	def do_HEAD(s):
 		s.send_response(200)
@@ -169,7 +230,7 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 		if not hasattr(s, 'config'):
 			s.config = ConfigParser.ConfigParser()
-			s.config.read(_configfile)
+			s.config.read(_default_configfile)
 
 		method = s.path[1:]
 		source = config.get('keps','source')
@@ -180,7 +241,7 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 			s.end_headers()
 
 			try:
-				kep = _methods[method]
+				kep = _http_get_methods[method]
 
 				if source == 'amsat': 
 					sat_name = kep[0]
@@ -199,10 +260,9 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 			if not hasattr(s, 'icon'):
 				s.config = ConfigParser.ConfigParser()
-				s.config.read(_configfile)
+				s.config.read(_default_configfile)
 				s.icon = open(config.get('tracking','satellite_icon'),'rb').read()
 
-			print 'requesting icon'
 			s.send_response(200)
 			s.send_header('Content-type', 'image/png')
 			s.end_headers()
@@ -295,7 +355,7 @@ def validate_config_file(filename):
 
 if __name__ == '__main__':
 
-	config_filename = _configfile 
+	config_filename = _default_configfile 
 
 	config = validate_config_file(config_filename)
 	if config is None:
