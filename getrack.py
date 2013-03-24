@@ -3,6 +3,7 @@ import getopt
 import logging
 import math
 import os
+import pickle
 import sys
 import time
 import urllib
@@ -91,6 +92,47 @@ _satellite_point_template = '''
 	</Point>
 </Placemark>
 '''
+
+_ground_station_network_link = '''
+<NetworkLink>
+	<name>stations</name><visibility>1</visibility><open>0</open>
+	<Link>
+		<href>http://[SERVER_PORT]/stations</href>
+		<refreshMode>onInterval</refreshMode>
+		<refreshInterval>[REFRESH_INTERVAL]</refreshInterval>
+	</Link>
+</NetworkLink>
+'''
+
+_ground_station_point_template = '''
+<Placemark> 
+	<name>[NAME]</name>
+	<styleUrl>#station</styleUrl>
+	<Point>
+	<coordinates>
+	[COORD]
+	</coordinates>
+	</Point>
+</Placemark>
+'''
+
+_ground_station_point_template_main = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+	<Document>
+		<name>[NAME]</name>
+		<description>[DESCRIPTION]</description>
+		<Style id="station">
+			<IconStyle>
+			<Icon>
+				<href>http://[SERVER]/stationicon</href>
+			</Icon>
+		</IconStyle>
+		</Style>
+		[PLACEMARKS]
+	</Document>
+</kml>
+'''
+
 
 def swap(input, tokens):
 	for key in tokens:
@@ -197,6 +239,7 @@ def generate_satellites_kml(config, keps):
 
 		if source == 'amsat': 
 			sat_name = kep[0]
+
 		elif source == 'spacetrack':
 			sat_name = kep[0][2:]
 
@@ -208,14 +251,37 @@ def generate_satellites_kml(config, keps):
 			network_link_kmls += get_network_link_kml(config, sat_name, server_address, server_port, method_name)
 			i += 1
 
+	if config.has_section('ground'):
+		network_link_kmls += _ground_station_network_link 
+
 	tokens = {
 		'[NETWORK_LINKS]': network_link_kmls,
-		'[REFRESH_INTERVAL]':config.get('tracking','refresh_interval_seconds')
+		'[REFRESH_INTERVAL]':config.get('tracking','refresh_interval_seconds'),
+        '[SERVER_PORT]': ('%s:%d' % (config.get('server','address'), config.getint('server','port')))
 	}
 
 	main_network_links_kml = swap(_network_link_main_kml, tokens)
 	open('satellites.kml', 'w').write(main_network_links_kml)
 
+def get_stations_kml(config, stations):
+
+	station_placemarks = ''
+	for station in stations:
+		tokens = {
+			'[NAME]':station[0],
+			'[COORD]': '%lf,%lf' % (station[1], station[2])
+		}
+
+		station_placemarks += swap(_ground_station_point_template, tokens)
+
+	tokens = {
+		'[NAME]':'ground stations',
+		'[DESCRIPTION]':'(none)',
+		'[PLACEMARKS]':station_placemarks,
+		'[SERVER]': ('%s:%d' % (config.get('server','address'), config.getint('server','port')))
+	}
+
+	return swap(_ground_station_point_template_main, tokens)
 
 class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 
@@ -276,6 +342,49 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 				log.error(str(e))
 				s.wfile.write('error!')
 
+		elif method == 'stationicon':
+
+			log.info('station icon method')
+
+			if not hasattr(s, 'station_icon'):
+				log.info('reading station icon')
+				s.config = ConfigParser.ConfigParser()
+				s.config.read(_default_configfile)
+				s.station_icon = open(config.get('ground','station_icon'),'rb').read()
+
+			log.info('delivering station icon')
+			s.send_response(200)
+			s.send_header('Content-type', 'image/png')
+			s.end_headers()
+
+			try:
+				s.wfile.write(s.station_icon)
+			except Exception, e:
+				log.error('error sending station icon')
+				log.error(str(e))
+				s.wfile.write('error!')
+
+		elif method == 'stations':
+
+			if not hasattr(s, 'station'):
+				s.config = ConfigParser.ConfigParser()
+				s.config.read(_default_configfile)
+				s.station = open(config.get('ground','station_icon'),'rb').read()
+				stations = eval(config.get('ground','stations'))
+				s.stations = get_stations_kml(config, stations)
+
+			s.send_response(200)
+			s.send_header('Content-type', 'image/png')
+			s.end_headers()
+
+			try:
+				s.wfile.write(s.stations)
+			except Exception, e:
+				log.error('error sending station')
+				log.error(str(e))
+				s.wfile.write('error!')
+
+
 		return
 
 def display_satellite_names(keps):
@@ -332,24 +441,23 @@ def validate_config_file(filename):
 	config = ConfigParser.ConfigParser()
 	config.read(filename)
 
-	sections = config.sections()
-	if not 'server' in sections:
+	if not config.has_section('server'):
 		log.error('unable to find server section in configuration file')
 		return None 
 
-	if not 'tracks' in sections:
+	if not config.has_section('tracks'):
 		log.error('unable to find tracks section in configuration file')
 		return None 
 
-	if not 'tracking' in sections:
+	if not config.has_section('tracking'):
 		log.error('unable to find tracking section in configuration file')
 		return None 
 
-	if not 'keps' in sections:
+	if not config.has_section('keps'):
 		log.error('unable to find keps section in configuration file')
 		return None 
 
-	if not 'amsat' in sections and not 'spacetrack' in sections:
+	if not config.has_section('amsat') and not config.has_section('spacetrack'):
 		log.error('unable to find amsat or spacetrack sections in configuration file')
 		return None 
 
