@@ -12,7 +12,7 @@ import BaseHTTPServer
 import ConfigParser
 from SimpleHTTPServer import SimpleHTTPRequestHandler
 
-_http_get_methods = {}
+_keps = {}
 _default_configfile = 'getrack.cfg'
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
@@ -133,6 +133,50 @@ _ground_station_point_template_main = '''<?xml version="1.0" encoding="UTF-8"?>
 </kml>
 '''
 
+_los_network_link = '''
+<NetworkLink>
+	<name>stations</name><visibility>1</visibility><open>0</open>
+	<Link>
+		<href>http://[SERVER_PORT]/los</href>
+		<refreshMode>onInterval</refreshMode>
+		<refreshInterval>[REFRESH_INTERVAL]</refreshInterval>
+	</Link>
+</NetworkLink>
+'''
+
+_los_network_link_main_kml = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+	<Document>
+		<name>los</name>
+		<description>los</description>
+		[PLACEMARKS]
+	</Document>
+</kml>
+'''
+
+_los_placemark_kml = '''
+<Placemark>
+	<name>[NAME]</name>
+	<description>[DESCRIPTION]</description>
+	<LineString>
+		<extrude>0</extrude>
+		<tessellate>1</tessellate>
+		<altitudeMode>relativeToGround</altitudeMode>
+		<coordinates>
+		[COORDS]
+		</coordinates>
+	</LineString>
+	<Style>
+		<LineStyle>
+			<width>3</width>
+			<color>[COLOR]</color>
+			<colorMode>normal</colorMode>
+			<gx:labelVisibility>1</gx:labelVisibility>
+		</LineStyle>
+	</Style>
+</Placemark>
+'''
+
 
 def swap(input, tokens):
 	for key in tokens:
@@ -230,7 +274,14 @@ def generate_satellites_kml(config, keps):
 	source = config.get('keps','source')
 	server_port = config.getint('server','port')
 	server_address = config.get('server','address')
-	sats_of_interest = [token.strip() for token in config.get('tracking','satellites').split(',')]
+
+	sats_of_interest = []
+	if config.has_section('tracking'):
+		if config.has_option('tracking','satellites'):
+			sats_of_interest.extend([token.strip() for token in config.get('tracking','satellites').split(',')])
+
+	if len(sats_of_interest) == 0:
+		sats_of_interest.extend([kep[0] for kep in keps])
 
 	i = 1 
 	network_link_kmls = ''
@@ -247,12 +298,16 @@ def generate_satellites_kml(config, keps):
 
 			log.info('processing: ' + sat_name)
 			method_name = 'satellite%d' % ( i )
-			_http_get_methods[method_name] = kep
+			_keps[method_name] = kep
 			network_link_kmls += get_network_link_kml(config, sat_name, server_address, server_port, method_name)
 			i += 1
 
 	if config.has_section('ground'):
 		network_link_kmls += _ground_station_network_link 
+
+	if config.has_section('ground'):
+		if config.getboolean('ground','los_to_sats'):
+			network_link_kmls += _los_network_link
 
 	tokens = {
 		'[NETWORK_LINKS]': network_link_kmls,
@@ -283,6 +338,47 @@ def get_stations_kml(config, stations):
 
 	return swap(_ground_station_point_template_main, tokens)
 
+def get_los_kml(config, stations):
+
+	los_placemarks = ''
+
+	color = config.get('ground','los_line_color')
+
+	for station in stations:
+
+		for kep in _keps.values():
+
+			observer = ephem.Observer()
+			observer.lon = str(station[1])
+			observer.lat = str(station[2])
+			observer.date = ephem.now()
+
+			kep_ephem = ephem.readtle(kep[0], kep[1], kep[2])
+			kep_ephem.compute(observer)
+
+			alt = ephem.degrees(kep_ephem.alt)
+
+			if alt > 0:
+
+				sat_long = math.degrees(kep_ephem.sublong)
+				sat_lat = math.degrees(kep_ephem.sublat)
+				sat_elevation = kep_ephem.elevation
+
+				tokens = {
+					'[NAME]':station[0],
+					'[DESCRIPTION]':'%s to %s' % (station[0], kep[0]),
+					'[COLOR]':color,
+					'[COORDS]': '%lf,%lf,%lf\n%lf,%lf,%lf' % (sat_long, sat_lat, sat_elevation, station[1], station[2], 0)
+				}
+
+				los_placemarks += swap(_los_placemark_kml, tokens)
+
+	tokens = {
+		'[PLACEMARKS]':los_placemarks,
+	}
+
+	return swap(_los_network_link_main_kml, tokens)
+
 class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 	def log_message(s, format, *args):
@@ -301,7 +397,7 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 			s.config.read(_default_configfile)
 
 		method = s.path[1:]
-		source = config.get('keps','source')
+		source = s.config.get('keps','source')
 
 		if method.startswith('satellite'):
 			s.send_response(200)
@@ -309,15 +405,15 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 			s.end_headers()
 
 			try:
-				kep = _http_get_methods[method]
+				kep = _keps[method]
 
 				if source == 'amsat': 
 					sat_name = kep[0]
 				elif source == 'spacetrack':
 					sat_name = kep[0][2:]
 
-				path = get_satellite_path(config, kep)
-				kml = get_kml_for_path(config, sat_name, path)
+				path = get_satellite_path(s.config, kep)
+				kml = get_kml_for_path(s.config, sat_name, path)
 				s.wfile.write(kml)
 			except Exception, e:
 				log.error('error generating kml')
@@ -327,9 +423,7 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 		elif method == 'icon':
 
 			if not hasattr(s, 'icon'):
-				s.config = ConfigParser.ConfigParser()
-				s.config.read(_default_configfile)
-				s.icon = open(config.get('tracking','satellite_icon'),'rb').read()
+				s.icon = open(s.config.get('tracking','satellite_icon'),'rb').read()
 
 			s.send_response(200)
 			s.send_header('Content-type', 'image/png')
@@ -348,9 +442,7 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 			if not hasattr(s, 'station_icon'):
 				log.info('reading station icon')
-				s.config = ConfigParser.ConfigParser()
-				s.config.read(_default_configfile)
-				s.station_icon = open(config.get('ground','station_icon'),'rb').read()
+				s.station_icon = open(s.config.get('ground','station_icon'),'rb').read()
 
 			log.info('delivering station icon')
 			s.send_response(200)
@@ -367,11 +459,9 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 		elif method == 'stations':
 
 			if not hasattr(s, 'station'):
-				s.config = ConfigParser.ConfigParser()
-				s.config.read(_default_configfile)
-				s.station = open(config.get('ground','station_icon'),'rb').read()
-				stations = eval(config.get('ground','stations'))
-				s.stations = get_stations_kml(config, stations)
+				s.station = open(s.config.get('ground','station_icon'),'rb').read()
+				stations = eval(s.config.get('ground','stations'))
+				s.stations = get_stations_kml(s.config, stations)
 
 			s.send_response(200)
 			s.send_header('Content-type', 'image/png')
@@ -381,6 +471,25 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 				s.wfile.write(s.stations)
 			except Exception, e:
 				log.error('error sending station')
+				log.error(str(e))
+				s.wfile.write('error!')
+
+		elif method == 'los':
+
+			if not hasattr(s, 'station'):
+				s.station = open(s.config.get('ground','station_icon'),'rb').read()
+				stations = eval(s.config.get('ground','stations'))
+				s.stations = get_stations_kml(s.config, stations)
+
+			s.send_response(200)
+			s.send_header('Content-type', 'application/vnd.google-earth.kml+xml')
+			s.end_headers()
+
+			try:
+				kml = get_los_kml(config, stations)
+				s.wfile.write(kml)
+			except Exception, e:
+				log.error('error sending los')
 				log.error(str(e))
 				s.wfile.write('error!')
 
