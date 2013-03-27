@@ -349,8 +349,9 @@ def get_los_kml(config, stations):
 		for kep in _keps.values():
 
 			observer = ephem.Observer()
-			observer.lon = str(station[1])
-			observer.lat = str(station[2])
+
+			observer.lon = math.radians(station[1])
+			observer.lat = math.radians(station[2])
 			observer.date = ephem.now()
 
 			kep_ephem = ephem.readtle(kep[0], kep[1], kep[2])
@@ -493,13 +494,20 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 				log.error(str(e))
 				s.wfile.write('error!')
 
-
 		return
 
 def display_satellite_names(keps):
 
-	for kep in keps:
-		print kep[0][2:]
+	source = config.get('keps','source')
+
+	log.info('displaying satellite names from source: ', source)
+
+	if source == 'amsat':
+		for kep in keps:
+			print kep[0]
+	else:
+		for kep in keps:
+			print kep[0][2:]
 
 def download_keps(config):
 
@@ -577,14 +585,20 @@ def validate_config_file(filename):
 	return config 
 
 def usage():
-	print '''python getrack.cfg -c config_filename'''
+	print ''' python getrack.cfg [ -c config_filename ] [-d] [-h]
+Options and Arguments
+-c arg : configuration file name
+-d     : display satellite names obtain from the configured keps source 
+-h     : display help '''
+
 
 if __name__ == '__main__':
 
+	dump_satellites = False
 	config_filename = _default_configfile 
 
 	try:
-		opts, args = getopt.getopt(sys.argv[1:], "hc:v", ["help", "config="])
+		opts, args = getopt.getopt(sys.argv[1:], "hc:dv", ["help", "config="])
 	except getopt.GetoptError as err:
 		print str(err)
 		usage()
@@ -595,6 +609,8 @@ if __name__ == '__main__':
 			sys.exit()
 		elif o in ("-c", "--config"):
 			config_filename = a
+		elif o in ('-d'):
+			dump_satellites = True
 		else:
 			assert False, "unhandled option"
 
@@ -606,7 +622,9 @@ if __name__ == '__main__':
 
 	log.info('obtained %d keps' % (len(keps)))
 
-	#display_satellite_names(keps)
+	if dump_satellites:
+		display_satellite_names(keps)
+		quit()
 
 	generate_satellites_kml(config, keps)
 	
