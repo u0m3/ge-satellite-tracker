@@ -509,9 +509,29 @@ def display_satellite_names(keps):
 		for kep in keps:
 			print kep[0][2:]
 
+def get_cache_filename(source):
+
+	return source + '.tle'
+
+def load_cached_keps(config):
+
+	source = config.get('keps','source')
+	cache_filename = get_cache_filename(source)
+
+	log.info('loading keps from cache %s' % (cache_filename))
+
+	if os.path.exists(cache_filename):
+		keps = open(cache_filename,'r').readlines()
+		keps = [line.strip() for line in keps]
+		return [ [keps[i], keps[i+1], keps[i+2]] for i in xrange(0, len(keps), 3)]
+
+	log.error('unable to find cache with filename: %s', cache_filename)
+	return None
+	
 def download_keps(config):
 
 	source = config.get('keps','source')
+	cache = config.getboolean('keps','cache')
 
 	log.info('downloading keps from %s' % (source))
 
@@ -537,6 +557,11 @@ def download_keps(config):
 			request.add_header('cookie', cookie)
 			
 			keps = urllib2.urlopen(request).readlines()
+
+		if cache:
+			cache_filename = get_cache_filename(source)
+			log.info('caching downloaded keps to: %s', cache_filename)
+			open(cache_filename, 'w').writelines(keps)
 
 		keps = [line.strip() for line in keps]
 		return [ [keps[i], keps[i+1], keps[i+2]] for i in xrange(0, len(keps), 3)]
@@ -618,9 +643,26 @@ if __name__ == '__main__':
 	if config is None:
 		quit()
 
-	keps = download_keps(config)
+	keps = None
+	use_cache = config.getboolean('keps','use_cache')
+	if use_cache:
+		keps = load_cached_keps(config)
 
-	log.info('obtained %d keps' % (len(keps)))
+		if keps is None:
+			log.info('unable to find keps in cache')
+		else:
+			log.info('using %d cached keps' % (len(keps)))
+
+	if keps is None:
+		keps = download_keps(config)
+		if keps is None:
+			log.error('failed to download keps')
+		else:
+			log.info('downloaded %d keps' % (len(keps)))
+
+	if keps is None:
+		log.error('unable to obtain keps!')
+		quit()
 
 	if dump_satellites:
 		display_satellite_names(keps)
