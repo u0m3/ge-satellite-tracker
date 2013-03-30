@@ -240,8 +240,8 @@ def get_satellite_path(config, keps):
 
 	kep_ephem = ephem.readtle(keps[0], keps[1], keps[2])
 
-	idx_time = ephem.now() - (config.getint('tracks','look_ahead_minutes') * ephem.minute)
-	end_time = ephem.now() + (config.getint('tracks','look_ahead_minutes') * ephem.minute)
+	idx_time = ephem.now() - (config.getint('tracking','look_ahead_minutes') * ephem.minute)
+	end_time = ephem.now() + (config.getint('tracking','look_ahead_minutes') * ephem.minute)
 	while(idx_time <= end_time): 
 
 		kep_ephem.compute(idx_time)
@@ -253,7 +253,7 @@ def get_satellite_path(config, keps):
 			kep_ephem.elevation,
 			kep_ephem.eclipsed])
 
-		idx_time += (config.getint('tracks','tick_interval_seconds') * ephem.second)
+		idx_time += (config.getint('tracking','tick_interval_seconds') * ephem.second)
 
 	return path
 
@@ -585,10 +585,6 @@ def validate_config_file(filename):
 
 	if not config.has_section('server'):
 		log.error('unable to find server section in configuration file')
-		return None 
-
-	if not config.has_section('tracks'):
-		log.error('unable to find tracks section in configuration file')
 		return None 
 
 	if not config.has_section('tracking'):
