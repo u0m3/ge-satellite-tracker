@@ -177,6 +177,57 @@ _los_placemark_kml = '''
 </Placemark>
 '''
 
+_satellite_footprint_network_link = '''
+<NetworkLink>
+	<name>stations</name><visibility>1</visibility><open>0</open>
+	<Link>
+		<href>http://[SERVER_PORT]/footprints</href>
+		<refreshMode>onInterval</refreshMode>
+		<refreshInterval>[REFRESH_INTERVAL]</refreshInterval>
+	</Link>
+</NetworkLink>
+'''
+
+_satellite_footprint_polygon_template = '''
+<Placemark>
+	<name>[NAME]</name>
+	<description>[DESCRIPTION]</description>
+	<Polygon>
+		<extrude>0</extrude>
+		<tessellate>1</tessellate>
+		<outerBoundaryIs>
+			<LinearRing>
+				<coordinates>
+				[COORDS]
+				</coordinates>
+			</LinearRing>
+		</outerBoundaryIs>
+	</Polygon>
+	<Style>
+		<LineStyle>
+			<width>3</width>
+			<color>[COLOR]</color>
+			<colorMode>normal</colorMode>
+			<gx:labelVisibility>1</gx:labelVisibility>
+		</LineStyle>
+		<PolyStyle>
+			<color>[COLOR]</color>
+		</PolyStyle>
+	</Style>
+</Placemark>
+
+'''
+
+_satellite_footprint_template_main = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+	<Document>
+		<name>[NAME]</name>
+		<description>[DESCRIPTION]</description>
+		[PLACEMARKS]
+	</Document>
+</kml>
+'''
+
 
 def swap(input, tokens):
 	for key in tokens:
@@ -305,6 +356,9 @@ def generate_satellites_kml(config, keps):
 	if config.has_section('ground'):
 		network_link_kmls += _ground_station_network_link 
 
+	if config.getboolean('tracking','show_footprints'):
+		network_link_kmls += _satellite_footprint_network_link
+		
 	if config.has_section('ground'):
 		if config.getboolean('ground','los_to_sats'):
 			network_link_kmls += _los_network_link
@@ -379,6 +433,54 @@ def get_los_kml(config, stations):
 	}
 
 	return swap(_los_network_link_main_kml, tokens)
+
+def get_footprint_points(lat, lon, elevation):
+
+	radius = 6378137.0
+	angle = math.acos(radius / (radius + elevation))
+
+	points = []
+	for angle_around_position in xrange(0, 360, 2):
+		rad_angle = math.radians(angle_around_position)
+		point = (math.degrees(lon + angle*math.cos(rad_angle)), math.degrees(lat + angle*math.sin(rad_angle)))
+		points.append(point)
+
+	return points
+
+def get_footprints_kml(config):
+
+	footprint_placemarks = ''
+
+	color = config.get('tracking','footprint_color')
+
+	for kep in _keps.values():
+
+		kep_ephem = ephem.readtle(kep[0], kep[1], kep[2])
+		kep_ephem.compute(ephem.now())
+
+		lon = kep_ephem.sublong
+		lat = kep_ephem.sublat
+		elevation = kep_ephem.elevation
+
+		coords = ''
+		for point in get_footprint_points(lat, lon, elevation):
+			coords += '%lf,%lf\n' % (point[0], point[1])
+
+		tokens = {
+			'[NAME]':kep[0],
+			'[DESCRIPTION]':'%s' % (kep[0]),
+			'[COLOR]':color,
+			'[COORDS]': coords
+		}
+
+		footprint_placemarks += swap(_satellite_footprint_polygon_template, tokens)
+
+	tokens = {
+		'[PLACEMARKS]':footprint_placemarks,
+	}
+
+	return swap(_satellite_footprint_template_main, tokens)
+
 
 class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 
@@ -491,6 +593,20 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 				s.wfile.write(kml)
 			except Exception, e:
 				log.error('error sending los')
+				log.error(str(e))
+				s.wfile.write('error!')
+
+		elif method == 'footprints':
+
+			s.send_response(200)
+			s.send_header('Content-type', 'application/vnd.google-earth.kml+xml')
+			s.end_headers()
+
+			try:
+				kml = get_footprints_kml(config)
+				s.wfile.write(kml)
+			except Exception, e:
+				log.error('error sending footprints')
 				log.error(str(e))
 				s.wfile.write('error!')
 
