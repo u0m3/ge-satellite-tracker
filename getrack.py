@@ -13,6 +13,46 @@ import ConfigParser
 from SimpleHTTPServer import SimpleHTTPRequestHandler
 
 _keps = {}
+
+_config = None
+_config_defaults = {
+	'server':{
+		'port':'8080',
+		'address':'localhost'
+	},
+	'tracking':{
+		'look_ahead_minutes':'90',
+		'tick_interval_seconds':'10',
+		'eclipsed_color':'5014F050',
+		'daylight_color':'5014F0F0',
+		'satellite_icon':'satellite_48_dis.png',
+		'refresh_interval_seconds':'2',
+		'satellites':'ISS',
+		'show_footprints':'True',
+		'footprint_color':'440000AA'
+	},
+	'keps':{
+		'source':'amsat',
+		'cache':'True',
+		'use_cache':'True'
+	},
+	'amsat':{
+		'url':'http://www.amsat.org/amsat/ftp/keps/current/nasabare.txt'
+	},
+	'spacetrack':{
+		'auth_url':'https://www.space-track.org/ajaxauth/login',
+		'keps_url':'https://www.space-track.org/basicspacedata/query/class/tle_latest/favorites/amateur/ORDINAL/1/EPOCH/%3Enow-30/format/3le',
+		'identity':'MISSING',
+		'password':'MISSING'
+	},
+	'ground':{
+		'los_to_sats':'True',
+		'los_line_color':'440000AA',
+		'station_icon':'satellite_ground_32.png',
+		'stations':'[]'
+	}
+}
+
 _default_configfile = 'getrack.cfg'
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
@@ -228,21 +268,20 @@ _satellite_footprint_template_main = '''<?xml version="1.0" encoding="UTF-8"?>
 </kml>
 '''
 
-
 def swap(input, tokens):
 	for key in tokens:
 		input = input.replace(key, tokens[key])
 	return input
 
-def get_kml_for_path(config, sat_name, path):
+def get_kml_for_path(sat_name, path):
 
 	color = ''
 	coords = ''
 	kml_placemarks = ''
 
-	daylight_color = config.get('tracking','daylight_color')
-	eclipsed_color = config.get('tracking','eclipsed_color')
-	refresh_interval = config.get('tracking','refresh_interval_seconds')
+	daylight_color = _config.get('tracking','daylight_color')
+	eclipsed_color = _config.get('tracking','eclipsed_color')
+	refresh_interval = _config.get('tracking','refresh_interval_seconds')
 
 	for i in xrange(len(path)-1):
 
@@ -280,19 +319,19 @@ def get_kml_for_path(config, sat_name, path):
 	tokens = {'[COORD]':'%lf,%lf,%lf' % (coord[1], coord[2], coord[3]), '[NAME]':sat_name, '[DESCRIPTION]':''}
 	kml_placemarks += swap(_satellite_point_template, tokens)
 
-	server = '%s:%d' % (config.get('server','address'), config.getint('server','port'))
+	server = '%s:%d' % (_config.get('server','address'), _config.getint('server','port'))
 	tokens = {'[PLACEMARKS]':kml_placemarks, '[REFRESH_INTERVAL]':str(refresh_interval), '[SATELLITE_NAME]':sat_name, '[DESCRIPTION]':'', '[SERVER]':server}
 
 	return swap(_satellite_kml_template, tokens)
 
-def get_satellite_path(config, keps):
+def get_satellite_path(keps):
 
 	path = []
 
 	kep_ephem = ephem.readtle(keps[0], keps[1], keps[2])
 
-	idx_time = ephem.now() - (config.getint('tracking','look_ahead_minutes') * ephem.minute)
-	end_time = ephem.now() + (config.getint('tracking','look_ahead_minutes') * ephem.minute)
+	idx_time = ephem.now() - (_config.getint('tracking','look_ahead_minutes') * ephem.minute)
+	end_time = ephem.now() + (_config.getint('tracking','look_ahead_minutes') * ephem.minute)
 	while(idx_time <= end_time): 
 
 		kep_ephem.compute(idx_time)
@@ -304,32 +343,32 @@ def get_satellite_path(config, keps):
 			kep_ephem.elevation,
 			kep_ephem.eclipsed])
 
-		idx_time += (config.getint('tracking','tick_interval_seconds') * ephem.second)
+		idx_time += (_config.getint('tracking','tick_interval_seconds') * ephem.second)
 
 	return path
 
-def get_network_link_kml(config, satellite_name, server, port, request_name):
+def get_network_link_kml(satellite_name, server, port, request_name):
 
 	tokens = {
 		'[SATELLITE_NAME]':  satellite_name,
 		'[SERVER_PORT]' : '%s:%d' % (server, port),
 		'[REQUEST_NAME]' : request_name,
-		'[REFRESH_INTERVAL]' : config.get('tracking', 'refresh_interval_seconds') }
+		'[REFRESH_INTERVAL]' : _config.get('tracking', 'refresh_interval_seconds') }
 
 	return swap(_network_link_kml, tokens)
 
-def generate_satellites_kml(config, keps):
+def generate_satellites_kml(keps):
 
 	log.info('generating satellites kml')
 
-	source = config.get('keps','source')
-	server_port = config.getint('server','port')
-	server_address = config.get('server','address')
+	source = _config.get('keps','source')
+	server_port = _config.getint('server','port')
+	server_address = _config.get('server','address')
 
 	sats_of_interest = []
-	if config.has_section('tracking'):
-		if config.has_option('tracking','satellites'):
-			sats_of_interest.extend([token.strip() for token in config.get('tracking','satellites').split(',')])
+	if _config.has_section('tracking'):
+		if _config.has_option('tracking','satellites'):
+			sats_of_interest.extend([token.strip() for token in _config.get('tracking','satellites').split(',')])
 
 	if len(sats_of_interest) == 0:
 		sats_of_interest.extend([kep[0] for kep in keps])
@@ -350,29 +389,29 @@ def generate_satellites_kml(config, keps):
 			log.info('processing: ' + sat_name)
 			method_name = 'satellite%d' % ( i )
 			_keps[method_name] = kep
-			network_link_kmls += get_network_link_kml(config, sat_name, server_address, server_port, method_name)
+			network_link_kmls += get_network_link_kml(sat_name, server_address, server_port, method_name)
 			i += 1
 
-	if config.has_section('ground'):
+	if _config.has_section('ground'):
 		network_link_kmls += _ground_station_network_link 
 
-	if config.getboolean('tracking','show_footprints'):
+	if _config.getboolean('tracking','show_footprints'):
 		network_link_kmls += _satellite_footprint_network_link
 		
-	if config.has_section('ground'):
-		if config.getboolean('ground','los_to_sats'):
+	if _config.has_section('ground'):
+		if _config.getboolean('ground','los_to_sats'):
 			network_link_kmls += _los_network_link
 
 	tokens = {
 		'[NETWORK_LINKS]': network_link_kmls,
-		'[REFRESH_INTERVAL]':config.get('tracking','refresh_interval_seconds'),
-        '[SERVER_PORT]': ('%s:%d' % (config.get('server','address'), config.getint('server','port')))
+		'[REFRESH_INTERVAL]':_config.get('tracking','refresh_interval_seconds'),
+        '[SERVER_PORT]': ('%s:%d' % (_config.get('server','address'), _config.getint('server','port')))
 	}
 
 	main_network_links_kml = swap(_network_link_main_kml, tokens)
 	open('satellites.kml', 'w').write(main_network_links_kml)
 
-def get_stations_kml(config, stations):
+def get_stations_kml(stations):
 
 	station_placemarks = ''
 	for station in stations:
@@ -387,16 +426,16 @@ def get_stations_kml(config, stations):
 		'[NAME]':'ground stations',
 		'[DESCRIPTION]':'(none)',
 		'[PLACEMARKS]':station_placemarks,
-		'[SERVER]': ('%s:%d' % (config.get('server','address'), config.getint('server','port')))
+		'[SERVER]': ('%s:%d' % (_config.get('server','address'), _config.getint('server','port')))
 	}
 
 	return swap(_ground_station_point_template_main, tokens)
 
-def get_los_kml(config, stations):
+def get_los_kml(stations):
 
 	los_placemarks = ''
 
-	color = config.get('ground','los_line_color')
+	color = _config.get('ground','los_line_color')
 
 	for station in stations:
 
@@ -447,11 +486,11 @@ def get_footprint_points(lat, lon, elevation):
 
 	return points
 
-def get_footprints_kml(config):
+def get_footprints_kml():
 
 	footprint_placemarks = ''
 
-	color = config.get('tracking','footprint_color')
+	color = _config.get('tracking','footprint_color')
 
 	for kep in _keps.values():
 
@@ -495,12 +534,8 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 	def do_GET(s):
 
-		if not hasattr(s, 'config'):
-			s.config = ConfigParser.ConfigParser()
-			s.config.read(_default_configfile)
-
 		method = s.path[1:]
-		source = s.config.get('keps','source')
+		source = _config.get('keps','source')
 
 		if method.startswith('satellite'):
 			s.send_response(200)
@@ -515,8 +550,8 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 				elif source == 'spacetrack':
 					sat_name = kep[0][2:]
 
-				path = get_satellite_path(s.config, kep)
-				kml = get_kml_for_path(s.config, sat_name, path)
+				path = get_satellite_path(kep)
+				kml = get_kml_for_path(sat_name, path)
 				s.wfile.write(kml)
 			except Exception, e:
 				log.error('error generating kml')
@@ -526,7 +561,7 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 		elif method == 'icon':
 
 			if not hasattr(s, 'icon'):
-				s.icon = open(s.config.get('tracking','satellite_icon'),'rb').read()
+				s.icon = open(_config.get('tracking','satellite_icon'),'rb').read()
 
 			s.send_response(200)
 			s.send_header('Content-type', 'image/png')
@@ -545,7 +580,7 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 			if not hasattr(s, 'station_icon'):
 				log.info('reading station icon')
-				s.station_icon = open(s.config.get('ground','station_icon'),'rb').read()
+				s.station_icon = open(_config.get('ground','station_icon'),'rb').read()
 
 			log.info('delivering station icon')
 			s.send_response(200)
@@ -562,9 +597,9 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 		elif method == 'stations':
 
 			if not hasattr(s, 'station'):
-				s.station = open(s.config.get('ground','station_icon'),'rb').read()
-				stations = eval(s.config.get('ground','stations'))
-				s.stations = get_stations_kml(s.config, stations)
+				s.station = open(_config.get('ground','station_icon'),'rb').read()
+				stations = eval(_config.get('ground','stations'))
+				s.stations = get_stations_kml(stations)
 
 			s.send_response(200)
 			s.send_header('Content-type', 'image/png')
@@ -580,16 +615,16 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 		elif method == 'los':
 
 			if not hasattr(s, 'station'):
-				s.station = open(s.config.get('ground','station_icon'),'rb').read()
-				stations = eval(s.config.get('ground','stations'))
-				s.stations = get_stations_kml(s.config, stations)
+				s.station = open(_config.get('ground','station_icon'),'rb').read()
+				stations = eval(_config.get('ground','stations'))
+				s.stations = get_stations_kml(stations)
 
 			s.send_response(200)
 			s.send_header('Content-type', 'application/vnd.google-earth.kml+xml')
 			s.end_headers()
 
 			try:
-				kml = get_los_kml(config, stations)
+				kml = get_los_kml(stations)
 				s.wfile.write(kml)
 			except Exception, e:
 				log.error('error sending los')
@@ -603,7 +638,7 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 			s.end_headers()
 
 			try:
-				kml = get_footprints_kml(config)
+				kml = get_footprints_kml()
 				s.wfile.write(kml)
 			except Exception, e:
 				log.error('error sending footprints')
@@ -614,7 +649,7 @@ class request_handler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 def display_satellite_names(keps):
 
-	source = config.get('keps','source')
+	source = _config.get('keps','source')
 
 	log.info('displaying satellite names from source: ', source)
 
@@ -629,9 +664,9 @@ def get_cache_filename(source):
 
 	return source + '.tle'
 
-def load_cached_keps(config):
+def load_cached_keps():
 
-	source = config.get('keps','source')
+	source = _config.get('keps','source')
 	cache_filename = get_cache_filename(source)
 
 	log.info('loading keps from cache %s' % (cache_filename))
@@ -644,32 +679,32 @@ def load_cached_keps(config):
 	log.error('unable to find cache with filename: %s', cache_filename)
 	return None
 	
-def download_keps(config):
+def download_keps():
 
-	source = config.get('keps','source')
-	cache = config.getboolean('keps','cache')
+	source = _config.get('keps','source')
+	cache = _config.getboolean('keps','cache')
 
 	log.info('downloading keps from %s' % (source))
 
 	try:
 		if source == 'amsat':
 
-			keps = urllib2.urlopen(config.get('amsat','url')).readlines()
+			keps = urllib2.urlopen(_config.get('amsat','url')).readlines()
 
 		elif source == 'spacetrack':
 
 			credentials = {
-				'identity':config.get('spacetrack','identity'),
-				'password':config.get('spacetrack','password')
+				'identity':_config.get('spacetrack','identity'),
+				'password':_config.get('spacetrack','password')
 			}
 
 			credentials = urllib.urlencode(credentials)
 
-			request = urllib2.Request(config.get('spacetrack','auth_url'), credentials)
+			request = urllib2.Request(_config.get('spacetrack','auth_url'), credentials)
 			response = urllib2.urlopen(request)
 			cookie = response.headers.get('Set-Cookie')
 
-			request = urllib2.Request(config.get('spacetrack','keps_url'))
+			request = urllib2.Request(_config.get('spacetrack','keps_url'))
 			request.add_header('cookie', cookie)
 			
 			keps = urllib2.urlopen(request).readlines()
@@ -688,32 +723,45 @@ def download_keps(config):
 
 	return None
 
-def validate_config_file(filename):
+def set_defaults(config, section, defaults):
+	for key in defaults:
+		config.set(section, key, defaults[key])
+		log.info('using %s : %s' % (key, defaults[key]))
+
+def read_config(filename):
 
 	log.info('validating config file %s', filename)
 
-	if not os.path.exists(filename):
-		log.error('unable to find configuration file')
-		return None
-
 	config = ConfigParser.ConfigParser()
-	config.read(filename)
+	try:
+		config.read(filename)
+	except:
+		log.warn('unable to find configuration file: ', filename)
 
 	if not config.has_section('server'):
-		log.error('unable to find server section in configuration file')
-		return None 
+		log.warn('server section not found in configuration file, using defaults')
+		config.add_section('server')
+		set_defaults(config, 'server', _config_defaults['server'])
 
 	if not config.has_section('tracking'):
-		log.error('unable to find tracking section in configuration file')
-		return None 
+		log.warn('tracking section was not found in configuration file, using defaults')
+		config.add_section('tracking')
+		set_defaults(config, 'tracking', _config_defaults['tracking'])
 
 	if not config.has_section('keps'):
-		log.error('unable to find keps section in configuration file')
-		return None 
+		log.warn('keps section was not found in configuration file, using deaults')
+		config.add_section('keps')
+		set_defaults(config, 'keps', _config_defaults['keps'])
 
-	if not config.has_section('amsat') and not config.has_section('spacetrack'):
-		log.error('unable to find amsat or spacetrack sections in configuration file')
-		return None 
+	if not config.has_section('amsat'):
+		log.warn('amsat section was not found in configuration file, using defaults')
+		config.add_section('amsat')
+		set_defaults(config, 'amsat', _config_defaults['amsat'])
+
+	if not config.has_section('spacetrack'):
+		log.warn('spacetrack section was not found in configuration file, using defaults')
+		config.add_section('spacetrack')
+		set_defaults(config, 'spacetrack', _config_defaults['spacetrack'])
 
 	#
 	# todo(joe) : add validation for each of the individual section fields
@@ -751,14 +799,14 @@ if __name__ == '__main__':
 		else:
 			assert False, "unhandled option"
 
-	config = validate_config_file(config_filename)
-	if config is None:
+	_config = read_config(config_filename)
+	if _config is None:
 		quit()
 
 	keps = None
-	use_cache = config.getboolean('keps','use_cache')
+	use_cache = _config.getboolean('keps','use_cache')
 	if use_cache:
-		keps = load_cached_keps(config)
+		keps = load_cached_keps()
 
 		if keps is None:
 			log.info('unable to find keps in cache')
@@ -766,7 +814,7 @@ if __name__ == '__main__':
 			log.info('using %d cached keps' % (len(keps)))
 
 	if keps is None:
-		keps = download_keps(config)
+		keps = download_keps()
 		if keps is None:
 			log.error('failed to download keps')
 		else:
@@ -780,11 +828,11 @@ if __name__ == '__main__':
 		display_satellite_names(keps)
 		quit()
 
-	generate_satellites_kml(config, keps)
+	generate_satellites_kml(keps)
 	
 	log.info('starting server')
 	log.info('(drag satellites.kml into google earth and enjoy)')
-	httpd = BaseHTTPServer.HTTPServer((config.get('server','address'), config.getint('server','port')), request_handler)
+	httpd = BaseHTTPServer.HTTPServer((_config.get('server','address'), _config.getint('server','port')), request_handler)
 	try:
 		httpd.serve_forever()
 	except KeyboardInterrupt:
