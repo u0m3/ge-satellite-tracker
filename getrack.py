@@ -367,7 +367,10 @@ def get_satellite_path(keps):
 
 	return path
 
-def get_network_link_kml(satellite_name, server, port, request_name):
+def get_network_link_kml(satellite_name, request_name):
+
+	port = _config.getint('server','port')
+	server = _config.get('server','address')
 
 	tokens = {
 		'[SATELLITE_NAME]':  satellite_name,
@@ -382,8 +385,6 @@ def generate_satellites_kml(keps):
 	log.info('generating satellites kml')
 
 	source = _config.get('keps','source')
-	server_port = _config.getint('server','port')
-	server_address = _config.get('server','address')
 
 	sats_of_interest = []
 	if _config.has_section('tracking'):
@@ -409,7 +410,7 @@ def generate_satellites_kml(keps):
 			log.info('processing: ' + sat_name)
 			method_name = 'satellite%d' % ( i )
 			_keps[method_name] = kep
-			network_link_kmls += get_network_link_kml(sat_name, server_address, server_port, method_name)
+			network_link_kmls += get_network_link_kml(sat_name, method_name)
 			i += 1
 
 	if _config.has_section('ground'):
@@ -696,7 +697,7 @@ def load_cached_keps():
 		keps = [line.strip() for line in keps]
 		return [ [keps[i], keps[i+1], keps[i+2]] for i in xrange(0, len(keps), 3)]
 
-	log.error('unable to find cache with filename: %s', cache_filename)
+	log.warn('unable to find cache with filename: %s', cache_filename)
 	return None
 	
 def download_keps():
@@ -743,7 +744,8 @@ def download_keps():
 
 	return None
 
-def set_defaults(config, section, defaults):
+def set_defaults(config, section):
+	defaults = _config_defaults[section]
 	for key in defaults:
 		config.set(section, key, defaults[key])
 		log.info('using %s : %s' % (key, defaults[key]))
@@ -761,27 +763,27 @@ def read_config(filename):
 	if not config.has_section('server'):
 		log.warn('server section not found in configuration file, using defaults')
 		config.add_section('server')
-		set_defaults(config, 'server', _config_defaults['server'])
+		set_defaults(config, 'server')
 
 	if not config.has_section('tracking'):
 		log.warn('tracking section was not found in configuration file, using defaults')
 		config.add_section('tracking')
-		set_defaults(config, 'tracking', _config_defaults['tracking'])
+		set_defaults(config, 'tracking')
 
 	if not config.has_section('keps'):
 		log.warn('keps section was not found in configuration file, using deaults')
 		config.add_section('keps')
-		set_defaults(config, 'keps', _config_defaults['keps'])
+		set_defaults(config, 'keps')
 
 	if not config.has_section('amsat'):
 		log.warn('amsat section was not found in configuration file, using defaults')
 		config.add_section('amsat')
-		set_defaults(config, 'amsat', _config_defaults['amsat'])
+		set_defaults(config, 'amsat')
 
 	if not config.has_section('spacetrack'):
 		log.warn('spacetrack section was not found in configuration file, using defaults')
 		config.add_section('spacetrack')
-		set_defaults(config, 'spacetrack', _config_defaults['spacetrack'])
+		set_defaults(config, 'spacetrack')
 
 	#
 	# todo(joe) : add validation for each of the individual section fields
@@ -821,13 +823,13 @@ if __name__ == '__main__':
 
 	_config = read_config(config_filename)
 	if _config is None:
-		quit()
+		sys.exit(2)
 
 	keps = None
 	use_cache = _config.getboolean('keps','use_cache')
+
 	if use_cache:
 		keps = load_cached_keps()
-
 		if keps is None:
 			log.info('unable to find keps in cache')
 		else:
@@ -842,7 +844,7 @@ if __name__ == '__main__':
 
 	if keps is None:
 		log.error('unable to obtain keps!')
-		quit()
+		sys.exit(2)
 
 	if dump_satellites:
 		display_satellite_names(keps)
