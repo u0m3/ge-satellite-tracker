@@ -694,7 +694,7 @@ def load_cached_keps():
 
 	if os.path.exists(cache_filename):
 		keps = open(cache_filename,'r').readlines()
-		keps = [line.strip() for line in keps]
+		keps = [line.strip() for line in keps if not line.strip() == '']
 		return [ [keps[i], keps[i+1], keps[i+2]] for i in xrange(0, len(keps), 3)]
 
 	log.warn('unable to find cache with filename: %s', cache_filename)
