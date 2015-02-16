@@ -6,7 +6,7 @@ Simple python implementation for displaying satellite positions in **Google Eart
 
  1. Install [python](https://www.python.org/).
  2. Install [pyephem](http://rhodesmill.org/pyephem/) via **pip** or **easy_install**.
- 3. Edit **getrack.cfg**.
+ 3. Copy or move or rename **getrack-sample.cfg** as **getrack.cfg** and edit it to your needs.
  4. Execute the script
 
   ```sh
