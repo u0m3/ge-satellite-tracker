@@ -8,10 +8,10 @@ Simple python implementation for displaying satellite positions in **Google Eart
  2. Install [pyephem](http://rhodesmill.org/pyephem/) via **pip** or **easy_install**.
  3. Edit **getrack.cfg**.
  4. Execute the script
- 
 
-    $ python getrack.py
-
+  ```sh
+  $ python getrack.py
+  ```
  5. Drag **satellites.kml** into *Google Earth*.
 
 ----------
@@ -60,11 +60,11 @@ Original readme:
 > The tick interval seconds defines how often points will be calculated along the orbit.
 > The tracking refresh interval seconds dictates how often Google Earth should ask for new orbital data.
 > 
-> ### Notes
+> ###Notes
 > - All Keplerian elements are obtained directly from space-track.org, so you will need an account.
 > - This script could be easily modified to work with other keplerian element sources (see todos)
 > 
-> ### Todos
+> ###Todos
 > - add opt-based command line parameters for
 >   * caching keps
 >   * loading keps from a cache for off-line use
